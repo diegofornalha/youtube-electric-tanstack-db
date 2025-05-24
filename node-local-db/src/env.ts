@@ -1,7 +1,2 @@
-import { z } from 'zod/v4'
-
-const envSchema = z.object({
-  DATABASE_URL: z.url(),
-})
-
-export const env = envSchema.parse(process.env)
+// Re-export from config/env.ts for backward compatibility
+export { env } from './config/env.ts'

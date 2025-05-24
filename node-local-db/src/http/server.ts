@@ -182,6 +182,207 @@ app.get('/issues/:id', {
   return result[0]
 })
 
+app.put('/issues/:id', {
+  schema: {
+    params: z.object({
+      id: z.coerce.number().int().positive(),
+    }),
+    body: z.object({
+      title: z.string().min(1).max(255).optional(),
+      description: z.string().optional(),
+      userId: z.coerce.number().int().positive().optional(),
+    }),
+    response: {
+      200: z.object({
+        id: z.number(),
+        title: z.string(),
+        description: z.string().nullable(),
+        userId: z.number(),
+        createdAt: z.date(),
+        updatedAt: z.date().nullable(),
+      }),
+      404: z.object({
+        error: z.string(),
+      }),
+    },
+  },
+}, async (request, reply) => {
+  const { id } = request.params
+  const updateData = request.body
+
+  // Check if issue exists
+  const [existingIssue] = await db
+    .select()
+    .from(schema.issues)
+    .where(eq(schema.issues.id, id))
+    .limit(1)
+
+  if (!existingIssue) {
+    return reply.status(404).send({ error: 'Issue not found' })
+  }
+
+  const [updatedIssue] = await db
+    .update(schema.issues)
+    .set({
+      ...updateData,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.issues.id, id))
+    .returning()
+
+  // Clear cache after update
+  issuesCache.clear()
+
+  return updatedIssue
+})
+
+app.delete('/issues/:id', {
+  schema: {
+    params: z.object({
+      id: z.coerce.number().int().positive(),
+    }),
+    response: {
+      204: z.null(),
+      404: z.object({
+        error: z.string(),
+      }),
+    },
+  },
+}, async (request, reply) => {
+  const { id } = request.params
+
+  // Check if issue exists
+  const [existingIssue] = await db
+    .select()
+    .from(schema.issues)
+    .where(eq(schema.issues.id, id))
+    .limit(1)
+
+  if (!existingIssue) {
+    return reply.status(404).send({ error: 'Issue not found' })
+  }
+
+  await db.delete(schema.issues).where(eq(schema.issues.id, id))
+
+  // Clear cache after delete
+  issuesCache.clear()
+
+  return reply.status(204).send()
+})
+
+// User endpoints
+app.post('/users', {
+  schema: {
+    body: z.object({
+      name: z.string().min(1).max(255),
+    }),
+    response: {
+      201: z.object({
+        id: z.number(),
+        name: z.string(),
+        createdAt: z.date(),
+      }),
+    },
+  },
+}, async (request, reply) => {
+  const { name } = request.body
+
+  const [newUser] = await db.insert(schema.users).values({
+    name,
+  }).returning()
+
+  return reply.status(201).send(newUser)
+})
+
+app.get('/users', {
+  schema: {
+    querystring: z.object({
+      page: z.coerce.number().int().positive().default(1),
+      limit: z.coerce.number().int().positive().max(100).default(20),
+    }),
+    response: {
+      200: z.object({
+        data: z.array(z.object({
+          id: z.number(),
+          name: z.string(),
+          createdAt: z.date(),
+        })),
+        pagination: z.object({
+          page: z.number(),
+          limit: z.number(),
+          total: z.number(),
+          totalPages: z.number(),
+        }),
+      }),
+    },
+  },
+}, async (request, reply) => {
+  const { page, limit } = request.query
+  const offset = (page - 1) * limit
+
+  const [users, [{ count }]] = await Promise.all([
+    db.select()
+      .from(schema.users)
+      .orderBy(desc(schema.users.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ count: sql<number>`count(*)::int` })
+      .from(schema.users),
+  ])
+
+  return {
+    data: users,
+    pagination: {
+      page,
+      limit,
+      total: count,
+      totalPages: Math.ceil(count / limit),
+    },
+  }
+})
+
+app.get('/users/:id', {
+  schema: {
+    params: z.object({
+      id: z.coerce.number().int().positive(),
+    }),
+    response: {
+      200: z.object({
+        id: z.number(),
+        name: z.string(),
+        createdAt: z.date(),
+        issuesCount: z.number(),
+      }),
+      404: z.object({
+        error: z.string(),
+      }),
+    },
+  },
+}, async (request, reply) => {
+  const { id } = request.params
+
+  const [user] = await db
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, id))
+    .limit(1)
+
+  if (!user) {
+    return reply.status(404).send({ error: 'User not found' })
+  }
+
+  // Count user's issues
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.issues)
+    .where(eq(schema.issues.userId, id))
+
+  return {
+    ...user,
+    issuesCount: count,
+  }
+})
+
 app.get('/health', {
   schema: {
     response: {
@@ -192,9 +393,9 @@ app.get('/health', {
       }),
     },
   },
-}, async (request, reply) => {
+}, async () => {
   return {
-    status: 'ok',
+    status: 'ok' as const,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
   }

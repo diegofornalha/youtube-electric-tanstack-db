@@ -7,4 +7,5 @@ export const issues = pgTable('issues', {
   description: text(),
   userId: integer().notNull().references(() => users.id),
   createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp({ withTimezone: true }),
 })
