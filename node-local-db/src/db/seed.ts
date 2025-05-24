@@ -2,13 +2,14 @@ import { reset, seed } from "drizzle-seed";
 import { db } from "./client.ts";
 import { schema } from "./schema/index.ts";
 
+console.time('Database reset')
 await reset(db, { schema })
-
-console.log('Database reset!')
+console.timeEnd('Database reset')
 
 const oneDayAgo = new Date();
-
 oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+console.time('Database seed')
 
 await seed(db, schema).refine(f => {
   return {
@@ -23,6 +24,9 @@ await seed(db, schema).refine(f => {
           ],
         })
       },
+      with: {
+        batchSize: 1000,
+      }
     },
 
     users: {
@@ -34,4 +38,5 @@ await seed(db, schema).refine(f => {
   }
 })
 
-console.log('Database seeded!')
+console.timeEnd('Database seed')
+console.log('✅ Database seeded successfully!')
